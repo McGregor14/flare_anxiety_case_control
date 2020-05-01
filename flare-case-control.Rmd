@@ -59,6 +59,9 @@ params:
 # rm(list = ls())
 ```
 
+GITHUB TEST
+
+
 * Load packages
 ```{r Load packages, include=FALSE}
 # install pacman package manager if it isn't already installed
