@@ -1,0 +1,1516 @@
+---
+title: "FLARe case-control analysis"
+author: "Tom McGregor"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: monochrome
+    number_sections: no
+    theme: paper
+params:
+  group_comparison:
+    value: anx_cont
+    choices:
+      - anx_cont
+      - anx.current_cont
+      - anx.life_cont
+      - anx.nodep_cont
+      - general.anx_control
+      - social.anx_control
+      - panic.anx_control
+      - gad.anx_gad.control
+      - gad.life_gad.life.control
+  drop_exclusions:
+    value: TRUE
+    choices:
+      - TRUE
+      - FALSE
+  avoiders_only:
+    value: FALSE
+    choices:
+      - TRUE
+      - FALSE
+  drop_incomplete:
+    value: TRUE
+    choices:
+      - TRUE
+      - FALSE
+  drop_twins:
+    value: FALSE
+    choices:
+      - TRUE
+      - FALSE
+  bar_diamonds:
+    value: duits_subjective
+    choices:
+      - duits_subjective
+      - duits_overall
+      - main_overall
+---
+# Setup
+
+## Steps
+
+* Clear workspace
+```{r Clear workspace, include=FALSE}
+# clear workspace
+# rm(list = ls())
+```
+
+* Load packages
+```{r Load packages, include=FALSE}
+# install pacman package manager if it isn't already installed
+if(!require("pacman")){
+  install.packages(
+    "pacman", 
+    dependencies = TRUE
+  )
+}
+
+# load pacman (package manager to allow install/library in one go using pload)
+library('pacman')
+
+# install (if necessary) and load packages
+p_load(
+psych, 
+arsenal, 
+knitr, 
+broom, 
+gridExtra, 
+corrr, 
+Hmisc, 
+effsize, 
+extrafont, 
+rlang, 
+kableExtra, 
+miceadds, 
+gmodels, 
+BayesFactor, 
+data.table, 
+patchwork, 
+RPMG,
+tidyverse,
+gt,
+DT,
+janitor
+  )
+```
+
+* Set seed
+```{r Set seed, include=FALSE}
+# set seed
+knitr::opts_chunk$set(
+  set.seed(31290)
+)
+```
+
+* Save date
+```{r Save date, include=FALSE}
+# save date
+date <- Sys.Date()
+```
+
+* Import objects created from cleaning script
+```{r Import cleaning objects, include=FALSE}
+# dataframe, variables of interest, trials
+load("../data/df1.RData")
+load("../data/vars_of_interest.RData")
+load("../data/vars_of_interest_thirds.RData")
+load("../data/fc_trials.RData")
+load("../data/emailed_n.RData")
+load("../data/consented_n.RData")
+load("../data/passed_screening_n.RData")
+load("../data/complete_n.RData")
+load("../data/TEDS.RData")
+```
+
+* Create functions
+```{r Create functions, echo=FALSE}
+# standard error function
+se_func <- function(x, na.rm=FALSE) {
+  if (na.rm) x <- na.omit(x)
+  sqrt(var(x)/length(x))
+}
+
+# 'not in' operator
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+# create a fuction to use when setting the breaks of the x axis in elephant plots. The function recognises whether the number of trials is more than 12, if it is it will give the x axis 18 points (i.e. extinction) and if it isn't it will give it 12 points (i.e. acquisition)
+breaks_fun <- function(x) {
+  if (max(x) > 12) {
+    seq(0, 18, 1)
+  } else {
+    seq(0, 12, 1)
+  }
+}
+
+# save table
+save_table <- function(df) {
+  table_name <- deparse(substitute(df))
+  fwrite(
+    df, 
+    file = 
+      paste0(
+        "../results/", 
+        group_comparison_char, 
+        "/",
+        table_name,
+        "_",
+        date,
+        ".csv"
+      )
+  )
+}
+
+# save plot
+save_plots <- function(plot) {
+  plot_name <- deparse(substitute(plot))
+  suppressMessages(
+    ggsave(
+      plot = plot, 
+      file = 
+        paste0(
+          "../plots/", 
+          group_comparison_char,
+          "/",
+          plot_name, 
+          "_",
+          date,
+          ".pdf"
+        )
+    )
+  )
+}
+```
+
+* Set parameterized objects
+```{r Parameterized objects, include=FALSE}
+# symbol and character versions of parameters
+group_comparison <- as.symbol(params$group_comparison)
+group_comparison_char <- as.character(params$group_comparison)
+bar_diamonds <- as.symbol(params$bar_diamonds)
+```
+
+* Comparison being made: **`r group_comparison_char`**
+
+* Create folders
+```{r Create folders, include=FALSE}
+dir.create(
+  path = 
+    paste0(
+      "../plots/",
+      group_comparison_char
+      ), 
+  recursive = T, 
+  showWarnings = F
+)
+
+dir.create(
+  path = 
+    paste0(
+    "../results/", 
+    group_comparison_char
+  ), 
+  recursive = T, 
+  showWarnings = F
+)
+```
+
+## Invited v. consented comparisons {.tabset .tabset-fade}
+### Age
+```{r Invited v consented age, echo=FALSE}
+# ttest for difference in age between groups
+invited_consented_age_ttest <- TEDS %>% 
+  t.test(
+    CurrentAge ~ did_consent_factor, data = .
+  )
+
+invited_consented_age_cohend <- TEDS %>%
+  cohen.d(
+    CurrentAge ~ did_consent_factor, data = .
+  )
+```
+
+d = `r round(invited_consented_age_cohend$estimate, 2)`; t(`r round(invited_consented_age_ttest$parameter, 2)`) = `r round(invited_consented_age_ttest$statistic, 2)`, p = `r round(invited_consented_age_ttest$p.value, 3)`.
+
+### Gender
+```{r Invited v consented gender, echo=FALSE}
+# chi-square test for gender
+# create a contingency table for sex by grouping variable
+invited_consented_gender_table <- TEDS %>% 
+  select(did_consent_factor, Sex) %>% 
+  table()
+
+invited_consented_gender_chisq <- stats::chisq.test(invited_consented_gender_table)
+invited_consented_gender_fisher <- stats::fisher.test(invited_consented_gender_table)
+```
+
+OR = `r round(invited_consented_gender_fisher$estimate, 2)`; 95% CI = `r round(invited_consented_gender_fisher$conf.int[1], 2)`, `r round(invited_consented_gender_fisher$conf.int[2], 2)`, p < `r round(invited_consented_gender_chisq$p.value, 3)`
+
+## Exclusion drop
+
+Exclusions for task avoidance: restarts/volume/headphones/instructions.
+
+Number of participants before exclusion drop: **`r nrow(df1)`**.  
+  
+```{r GAD excluded v completers, echo=F, fig.align='left'}
+df1 %>% 
+  group_by(exclude) %>%
+  summarise(
+    count = n(),
+    meanGAD = round(mean(GAD, na.rm = T), 2),
+    seGAD = round(se_func(GAD, na.rm = T), 2)
+  ) %>% 
+  mutate(
+    mean_se = paste0(meanGAD, " ", "(", seGAD, ")"),
+    exclude = paste0(exclude, " ", "(n = ", count, ")")
+  ) %>% 
+  select(Exclude = exclude, `GAD-7 M (SE)` = mean_se) %>%
+  kable(align = c('l', 'r'))
+
+exclude_gad_ttest <- df1 %>% 
+  t.test(
+    GAD ~ exclude, data = .
+  )
+
+exclude_gad_cohend <- df1 %>% 
+  cohen.d(
+    GAD ~ exclude, data = .
+  )
+```
+<br>GAD-7 difference between included and excluded participants: **d = `r round(exclude_gad_cohend$estimate, 2)`; t(`r round(exclude_gad_ttest$parameter, 2)`) = `r round(exclude_gad_ttest$statistic, 2)`, p = `r round(exclude_gad_ttest$p.value, 3)`.**
+
+Dropping exclusions? **`r params$drop_exclusions`**.
+
+```{r Exclusion drop, include=FALSE}
+if(params$drop_exclusions){
+  df1 <- df1 %>% 
+    filter(
+      exclude == "no"
+    )
+}
+
+not_excluded_n <- nrow(df1)
+```
+
+Number of participants after drop (if applicable): **`r nrow(df1)`**.
+  
+## Task avoiders only 
+
+***Exclusion drop must equal FALSE***
+
+Task avoidance: restarts/volume/headphones/instructions.
+
+Number of participants before non-avoiders dropped: **`r nrow(df1)`**.
+
+Dropping non-avoiders? **`r params$avoiders_only`**. 
+
+```{r Exclusions only, include=FALSE}
+if(params$avoiders_only){
+  df1 <- df1 %>% 
+    filter(
+      exclude == "yes"
+    )
+}
+```
+
+Number of participants after drop (if applicable): **`r nrow(df1)`**.
+
+## Incomplete cases check
+
+Number of participants incomplete cases drop: **`r nrow(df1)`**.
+
+Dropping incomplete cases? **`r params$drop_incomplete`**.
+```{r Incomplete cases check, include=FALSE}
+if(params$drop_incomplete){
+  df1 <- df1 %>%
+    # remove rows with missing data for key variables
+    filter(
+      complete.cases(
+        FCT1CSpMea, 
+        FCT1CSmMea, 
+        FCT1CSdifMea, 
+        FCT3CSpMea, 
+        FCT3CSmMea, 
+        FCT3CSdifMea
+      )
+    )
+}
+
+without_missing_data_n <- nrow(df1)
+```
+
+Number of participants after drop (if applicable): **`r nrow(df1)`**.
+  
+## Twin check
+
+Number of participants pre twin drop: **`r nrow(df1)`**.
+
+Dropping twins? **`r params$drop_twins`**.
+```{r Twin check, include=FALSE}
+if(params$drop_twins){
+  df1 <- df1 %>% 
+    group_by(FamilyID) %>%
+    sample_n(1) %>% 
+    ungroup()
+}
+```
+
+Number of participants after drop (if applicable): **`r nrow(df1)`**.
+  
+## Participant breakdown
+Number of participants emailed: **`r emailed_n`**
+
+Number of participants consented: **`r consented_n`**
+
+Number of participants who passed screening: **`r passed_screening_n`**
+
+Number of participants who completed the study: **`r complete_n`**
+
+Number of participants who weren't excluded: **`r not_excluded_n`**
+
+Number of participants without missing data: **`r without_missing_data_n`**
+
+***
+
+# Phenotypic check {.tabset .tabset-fade}
+
+## Group numbers
+Number of participants in each group.
+
+```{r Check numbers in each group, echo=FALSE}
+group_check <- df1 %>% 
+  mutate(
+    {{group_comparison}} :=
+      fct_explicit_na(
+        factor({{group_comparison}}),
+        na_level = "missing"
+        )
+  ) %>% 
+  group_by({{group_comparison}}) %>% 
+  count() %>% 
+  rename(group = {{group_comparison}})
+
+save_table(group_check)
+
+group_check %>% 
+kable()
+```
+<br>Wide and long dataframes are created from cases and controls.
+
+Participants who are missing for the grouping variable are removed.
+
+```{r Create df, include=FALSE}
+# new (better) names for vars_of_interest
+newnames  <-  vars_of_interest %>% 
+  str_replace_all(., "FCT1", "Acquisition_") %>% 
+  str_replace_all(., "FCT3", "Extinction_") %>% 
+  str_replace_all(., "Mea", "") %>% 
+  str_replace_all(., "p", "+") %>% 
+  str_replace_all(., "m", "-") %>% 
+  str_replace_all(., "CSdif", "Discrimination")
+
+# create wide df
+df.wide <- df1 %>%
+  filter(complete.cases({{group_comparison}}))
+ 
+
+# create long df for variables of interest and status
+df.long <- df.wide %>% 
+  select({{group_comparison_char}}, vars_of_interest, FamilyID) %>% 
+  gather("key", "score", -c({{group_comparison}}, FamilyID)) %>%
+  mutate(
+    measure = factor(ifelse(str_detect(key, "FCT"), "Expectancy", NA)),
+    phase = factor(ifelse(str_detect(key, "FCT1"), "Acquisition", "Extinction")),
+    stimulus = factor(
+      case_when(str_detect(key, "CSp") ~ "CS+",
+                str_detect(key, "CSm") ~ "CS-",
+                str_detect(key, "dif") ~ "Discrimination",
+                str_detect(key, "Dif") ~ "Discrimination"),
+      levels = c("CS+", "CS-", "Discrimination"))) %>% 
+  mutate({{group_comparison_char}} := factor({{group_comparison}})) %>% 
+  select(FamilyID, {{group_comparison_char}}, measure, phase, stimulus, score)
+
+# Save data sets for df.wide and df.long (for main analysis only)
+if(group_comparison_char == "anx_cont"){
+  write.csv(df.wide, paste0("../data/study1-dataset-wide", "-", date, ".csv"))
+  write.csv(df.long, paste0("../data/study1-dataset-long", "-", date, ".csv"))
+}
+```
+
+## Sample table
+```{r Sample table, echo=FALSE}
+# create sample table giving descriptive statistics for each group (i.e. cases and controls)
+sample_table <- df.wide %>% 
+  group_by({{group_comparison}}) %>% 
+  summarise(
+    
+    count = n(),
+    
+    nFemale = sum(Sex == "female"),
+    propFemale = mean(Sex == "female"),
+    nMale = sum(Sex == "male"),
+    propMale = mean(Sex == "male"),
+    
+    meanAge = mean(CurrentAge),
+    seAge = se_func(CurrentAge, na.rm = T),
+    meanGAD = mean(GAD),
+    seGAD = se_func(GAD, na.rm = T),
+    
+    nLifetime = sum(GAD.dia == 0 & MHQ.Anx == 1),
+    nCurrent = sum(GAD.dia == 1 & MHQ.Anx == 0),
+    nLifeAndCurrent = sum(GAD.dia == 1 & MHQ.Anx == 1)
+  ) %>% 
+  mutate_if(is.numeric, ~round(., 2)) %>% 
+  mutate(
+    group = case_when(
+      {{group_comparison}} == "case" ~ paste0("Anxious", " ", "(N = ", count, ")"),
+      {{group_comparison}} == "control" ~ paste0("Non-anxious", " ", "(N = ", count, ")")
+    ),
+    Females = paste0(nFemale, " ", "(", propFemale, ")"),
+    Males = paste0(nMale, " ", "(", propMale, ")"),
+    Age = paste0(meanAge, " ", "(", seAge, ")"),
+    `GAD-7` = paste0(meanGAD, " ", "(", seGAD, ")")
+  ) %>% 
+  select(
+    group,
+    Females,
+    Males,
+    Age,
+    `GAD-7`,
+    `Self-reported lifetime diagnosis` = nLifetime,
+    `GAD-7 diagnosis` = nCurrent,
+    `Self-reported lifetime diagnosis & GAD-7 diagnosis` = nLifeAndCurrent
+  ) %>% 
+  gather(measure, value, -group) %>%
+  mutate(measure = factor(measure, 
+                          levels = c(
+                            "group",
+                            "Females",
+                            "Males",
+                            "Age",
+                            "GAD-7",
+                            "Self-reported lifetime diagnosis",
+                            "GAD-7 diagnosis",
+                            "Self-reported lifetime diagnosis & GAD-7 diagnosis"
+                          ))) %>% 
+  spread(group, value) %>% 
+  mutate(measure_group = case_when(
+    measure == "Females"|measure == "Males" ~ "Sex (%)",
+    measure == "Age"|measure == "GAD-7" ~ "Group means (SE)",
+    TRUE ~ "Number of participants meeting criteria for one or both grouping conditions"
+  )
+  ) %>% 
+  select(measure_group, everything())
+
+save_table(sample_table)
+
+sample_table %>% 
+  gt(rowname_col = "measure", groupname_col = "measure_group") %>%
+  tab_header(title = "Sample table")
+```
+
+## Anxiety breakdown
+
+```{r Anxiety breakdown, echo=FALSE}
+anxiety_breakdown <- df.wide %>%
+  filter({{group_comparison}} == "case") %>%
+  mutate_at(c("MHQ.AnxGen", "MHQ.AnxPA", "MHQ.AnxSoc", "MHQ.AnxAgo", "MHQ.OCD", "MHQ.OCDoth", "MHQ.PTSD", "MHQ.AnxPho"), ~replace_na(., replace = 0)) %>% 
+  select(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) %>% 
+  group_by(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) %>% 
+  count() %>% 
+  mutate(Diagnosis = case_when(
+    sum(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "GAD-7 diagnosis",
+    
+    MHQ.AnxGen == 1 & sum(MHQ.AnxPA, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Generalised anxiety",
+    MHQ.AnxPA == 1 & sum(MHQ.AnxGen, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Panic attacks",
+    MHQ.AnxSoc == 1 & sum(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Social phobia",
+    MHQ.AnxAgo == 1 & sum(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxSoc, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Agoraphobia",
+    
+    MHQ.AnxGen == 1 & MHQ.AnxPA == 1 & sum(MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Generalised anxiety & panic attacks",
+    MHQ.AnxGen == 1 & MHQ.AnxSoc == 1 & sum(MHQ.AnxPA, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Generalised anxiety & social phobia",
+    MHQ.AnxGen == 1 & MHQ.AnxAgo == 1 & sum(MHQ.AnxPA, MHQ.AnxSoc, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Generalised anxiety & agoraphobia",
+    
+    MHQ.AnxSoc == 1 & MHQ.AnxPA == 1 & sum(MHQ.AnxGen, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Social phobia & panic attacks",
+     MHQ.AnxSoc == 1 & MHQ.AnxAgo == 1 & sum(MHQ.AnxGen, MHQ.AnxPA, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Social phobia & agoraphobia",
+    
+    MHQ.AnxAgo == 1 & MHQ.AnxPA == 1 & sum(MHQ.AnxGen, MHQ.AnxSoc, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) == 0 ~ "Agoraphobia & panic attacks",
+    
+    sum(MHQ.AnxGen, MHQ.AnxPA, MHQ.AnxSoc, MHQ.AnxAgo, MHQ.OCD, MHQ.OCDoth, MHQ.PTSD, MHQ.AnxPho) >= 3 ~ "Three or more diagnoses",
+    
+    TRUE ~ "Undefined"
+  )
+  ) %>% 
+  ungroup() %>% 
+  select(Diagnosis, n) %>% 
+  filter(Diagnosis != "GAD-7 diagnosis") %>% 
+  group_by(Diagnosis) %>% 
+  summarise(`N` = sum(n)) %>% 
+  arrange(Diagnosis)
+
+save_table(anxiety_breakdown)
+
+anxiety_breakdown %>% 
+  gt(rowname_col = "Diagnosis") %>%
+  tab_header(title = "Breakdown of self-reported, clinician-provided, diagnoses of anxiety disorders")
+```
+
+## Twin breakdown
+
+```{r Twin breakdown,echo=FALSE}
+concordant_twins <- df.wide %>% 
+  group_by({{group_comparison}}, FamilyID, Zygosity) %>%
+  count() %>% 
+  ungroup() %>% 
+  group_by({{group_comparison}}, Zygosity, n) %>% 
+  count() %>% 
+  ungroup() %>% 
+  filter(n == 2) %>% 
+  select({{group_comparison}}, Zygosity, n = nn) %>% 
+  mutate(concordance = "concordant")
+
+concordant_twins_by_zygosity <- concordant_twins %>% 
+  group_by(Zygosity) %>% 
+  summarise(concordant_twin_pairs = sum(n))
+
+discordant_twins <- df.wide %>% 
+  group_by(FamilyID, Zygosity) %>% 
+  count() %>%
+  ungroup() %>% 
+  group_by(Zygosity, n) %>% 
+  count() %>% 
+  ungroup() %>% 
+  filter(n == 2) %>% 
+  select(Zygosity, total_twin_pairs = nn) %>% 
+  right_join(concordant_twins_by_zygosity, by = "Zygosity") %>% 
+  mutate(
+    discordant_twin_pairs = total_twin_pairs - concordant_twin_pairs,
+    concordance = "discordant",
+    {{group_comparison}} := "cross-group"
+  ) %>% 
+  select({{group_comparison}}, Zygosity, n = discordant_twin_pairs, concordance)
+
+singletons <- df.wide %>% 
+  group_by(FamilyID) %>% 
+  mutate(pair = n()>1) %>% 
+  ungroup() %>% 
+  filter(pair == FALSE) %>% 
+  group_by({{group_comparison}}, Zygosity) %>% 
+  count() %>%
+  mutate(concordance = "singletons")
+
+twin_split <- bind_rows(
+  concordant_twins, 
+  discordant_twins, 
+  singletons
+) %>% 
+  select(concordance, {{group_comparison}}, Zygosity, n) %>% 
+  spread(Zygosity, n) %>% 
+  rename(MZ = "1", DZ = "2") %>% 
+  mutate(
+    MZ = ifelse(
+      concordance == "singletons", MZ, 2*(MZ)
+    ),
+    DZ = ifelse(
+      concordance == "singletons", DZ, 2*(DZ)
+    ),
+    n = MZ + DZ,
+    pairs = ifelse(
+      concordance == "singletons", NA_real_, n/2
+    ),
+    mz_percent = MZ/n
+    ) %>% 
+  add_row(concordance = " ", 
+          {{group_comparison}} := "Total",
+          MZ = sum(.$MZ),
+          DZ = sum(.$DZ),
+          n = sum(.$n),
+          pairs = sum(.$pairs, na.rm = T),
+          mz_percent = MZ/n
+  ) %>% 
+  mutate_if(is.double, ~round(., 2))
+
+save_table(twin_split)
+
+twin_split_gt <- twin_split %>%
+  select(concordance, {{group_comparison}}, "Individual twins" = n, "Twin pairs" = pairs, "%MZ" = mz_percent) %>% 
+  mutate(
+    concordance = str_to_title(concordance),
+    {{group_comparison}} := recode(
+      {{group_comparison}},
+      case = "Anxious", 
+      control = "Non-anxious",
+      'cross-group' = "Cross-group"
+    )
+  ) %>% 
+  gt(rowname_col = {{group_comparison_char}}, groupname_col = "concordance") %>%
+  tab_header(
+    title = "Twin breakdown",
+    subtitle = "Individuals, pairs and %MZ broken down across groups"
+  ) %>%
+  fmt_percent(columns = vars('%MZ'), decimals = 0) %>%
+  fmt_missing(columns = vars("Twin pairs"), missing_text = "---")
+
+twin_split_gt
+```
+
+## Age
+
+**Case v control comparison**
+```{r Case v control age, echo=FALSE}
+# ttest for difference in age between groups
+case_control_age_ttest <- df.wide %>% 
+  t.test(
+    CurrentAge ~ get(group_comparison_char), data = .
+  )
+
+case_control_age_cohend <- df.wide %>% 
+  cohen.d(
+    CurrentAge ~ get(group_comparison_char), data = .
+  )
+```
+
+d = `r round(case_control_age_cohend$estimate, 2)`; t(`r round(case_control_age_ttest$parameter, 2)`) = `r round(case_control_age_ttest$statistic, 2)`, p = `r round(case_control_age_ttest$p.value, 3)`.
+
+## Gender
+
+**Case v control comparison**
+```{r Case v control gender, echo=FALSE}
+# chi-square test for gender
+# create a contingency table for sex by grouping variable
+group_gender_table <- df.wide %>% select(Sex, {{group_comparison}}) %>% table()
+
+group_gender_chisq <- stats::chisq.test(group_gender_table)
+group_gender_fisher <- stats::fisher.test(group_gender_table)
+```
+
+OR = `r round(group_gender_fisher$estimate, 2)`; 95% CI = `r round(group_gender_fisher$conf.int[1], 2)`, `r round(group_gender_fisher$conf.int[2], 2)`, p < `r round(group_gender_chisq$p.value, 3)`
+
+## GAD & PHQ {.tabset .tabset-fade}
+
+### Correlations
+```{r GAD PHQ correlation, include=FALSE}
+# Create correlation matrix
+correlation <- df.wide %>% 
+  select(GAD, PHQ, vars_of_interest) %>% 
+  as.matrix() %>%
+  rcorr(type = "spearman")
+```
+
+Correlation between GAD and PHQ: `r round(correlation$r["GAD","PHQ"], 2)`, p = `r round(correlation$P["GAD","PHQ"], 3)`
+
+```{r GAD PHQ correlation with vars of interest, echo=FALSE}
+# GAD and PHQ correlation with vars of interest
+df.wide %>% 
+  select(GAD, PHQ, vars_of_interest) %>%
+  rename_at(vars(vars_of_interest), ~ newnames) %>% 
+  correlate(quiet = T) %>% 
+  # focus tidies the correlation matrix
+  focus(GAD, PHQ) %>% 
+  rename(Measure = rowname) %>% 
+  mutate_if(is.double, ~round(., 2)) %>%
+  kable()
+```
+
+### T-tests {.tabset .tabset-fade}
+
+**GAD-7: case v control**
+```{r GAD t test, echo=FALSE}
+# ttest for difference in GAD between groups
+group_gad_ttest <- df.wide %>% 
+  t.test(
+    GAD ~ get(group_comparison_char), data = .
+  )
+
+group_gad_cohend <- df.wide %>% 
+  cohen.d(
+    GAD ~ get(group_comparison_char), data = .
+  )
+```
+d = `r round(group_gad_cohend$estimate, 2)`; t(`r round(group_gad_ttest$parameter, 2)`) = `r round(group_gad_ttest$statistic, 2)`, p = `r round(group_gad_ttest$p.value, 3)`.
+
+**PHQ: case v control**
+```{r PHQ t test, echo=FALSE}
+# ttest for difference in PHQ between groups
+group_phq_ttest <- df.wide %>% 
+  t.test(
+    PHQ ~ get(group_comparison_char), data = .
+  )
+
+group_phq_cohend <- df.wide %>% 
+  cohen.d(
+    PHQ ~ get(group_comparison_char), data = .
+  )
+```
+
+d = `r round(group_phq_cohend$estimate, 2)`; t(`r round(group_phq_ttest$parameter, 2)`) = `r round(group_phq_ttest$statistic, 2)`, p = `r round(group_phq_ttest$p.value, 3)`.
+
+***
+
+# Expectancies {.tabset .tabset-fade}
+## Expectancy summary
+```{r Summary table, echo=FALSE}
+# expectancy_summary: n, missing, min, max, mean, median, sd, se, ci, skew, kurtosis
+expectancy_summary <- df.wide %>%
+  rename_at(vars(vars_of_interest), ~ newnames) %>% 
+  select({{group_comparison}}, tidyselect::all_of(newnames)) %>%
+  group_by({{group_comparison}}) %>%
+  summarise_all(
+    list( 
+      ~ n(),
+      missing = ~sum(is.na(.)),
+      ~min(.),
+      ~max(.),
+      ~mean(.), 
+      ~median(.),
+      ~sd(x = .), 
+      se = ~se_func(.),
+      ~skew(.), 
+      kurtosis = ~kurtosi(.))
+  ) %>% 
+  ungroup() %>% 
+  gather(var, value, -{{group_comparison}}) %>%
+  separate(var, c("phase", "stimulus", "measure"), "_", extra = "drop") %>% 
+   mutate(
+    stimulus = factor(
+      stimulus, 
+      levels = c(
+        "CS+", 
+        "CS-", 
+        "Discrimination"
+      )
+    )
+  ) %>% 
+  spread(measure, value) %>% 
+  mutate(
+    lower_ci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+    upper_ci = mean + qt(1 - (0.05 / 2), n - 1) * se
+  ) %>%
+  mutate_if(is.numeric, round, 2) %>%
+  gather(measure, value, -c({{group_comparison}}, phase, stimulus)) %>% 
+  spread({{group_comparison}}, value) %>% 
+  mutate(
+    measure = factor(
+      measure, 
+      levels = c(
+        "n", 
+        "missing", 
+        "min", 
+        "max", 
+        "mean", 
+        "median", 
+        "sd", 
+        "se", 
+        "lower_ci",
+        "upper_ci",
+        "skew", 
+        "kurtosis"
+      )
+    )
+  ) %>% 
+  arrange(phase, stimulus, measure)
+
+save_table(expectancy_summary)
+
+datatable(expectancy_summary)
+```
+
+## Interaction plot
+```{r Interaction plot, echo=F}
+# Interaction plot
+interaction_plot <- expectancy_summary %>% 
+  filter(stimulus != "Discrimination") %>%
+  gather({{group_comparison_char}}, "value", c("case", "control")) %>% 
+  spread(measure, value) %>% 
+  ggplot(aes(x = stimulus, y = mean, colour = {{group_comparison}})) + 
+  geom_point() +
+  geom_line(aes(group = {{group_comparison}})) +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = .3) +
+  facet_wrap(~phase)
+
+save_plots(interaction_plot)
+
+interaction_plot
+```
+
+## Distributions 1: Scatterplots with boxplot overlays
+```{r Scatterplots with boxplot overlays, echo=FALSE}
+# Scatterplot with boxplot overlay to highlight outliers for each stimulus per condition
+scatterplot <- df.long %>%
+  ggplot(
+    ., 
+    aes(
+      x = fct_rev(stimulus:{{group_comparison}}), 
+      y = score, 
+      color = stimulus
+    )
+  ) +
+  geom_point(position = "jitter", alpha = .5) +
+  geom_boxplot(
+    aes(group = stimulus:{{group_comparison}}), 
+    color = "black", 
+    alpha = 0, 
+    width = .5
+  ) +
+  facet_wrap(~ phase) +
+  coord_flip() +
+  theme(panel.background = element_blank()) +
+  scale_colour_manual(values = c("#F5434A", "#14A8EC", "#EF42DF")) +
+  labs(title = paste(group_comparison_char), keep = T)
+
+save_plots(scatterplot)
+
+scatterplot
+```
+
+## Distributions 2: Density plots for each stimulus per condition
+```{r Density plots for each stimulus per condition, echo=FALSE}
+# Density plots for each stimulus per condition
+density_plot <- df.long %>%
+  ggplot(
+    .,
+    aes(
+      x = score, 
+      colour = {{group_comparison}},
+      fill = {{group_comparison}}, 
+      alpha = .8
+    )
+  ) +
+  geom_density(position = "identity") +
+  facet_wrap(
+    phase ~ stimulus, 
+    nrow = length(unique(df.long$phase)), 
+    ncol = length(unique(df.long$stimulus))
+  ) + 
+  scale_color_manual(values=c("#00AFBB", "#FF0066", "orange")) +
+  scale_fill_manual(values=c("#00AFBB", "#FF0066", "orange")) +
+  theme(panel.background = element_blank()) +
+  labs(title = paste(group_comparison_char), keep = T)
+
+save_plots(density_plot)
+
+density_plot
+```
+
+***
+
+# Fear conditioning analyses {.tabset .tabset-fade}
+
+## Means {.tabset .tabset-fade}
+
+### ANOVAs
+```{r anova of means for both phases, echo=FALSE}
+# run anova for both phases - means
+means_aov <- df.long %>% 
+  # remove Discrimination rows
+  filter(stimulus != "Discrimination") %>%
+  # group by phase (acquisition/extinction)
+  group_by(phase) %>%
+  # nest the df - essentially create a df for each grouping set above 
+  nest() %>% 
+  # create new list columns in the df containing anova model output and tidied version of the model output
+  mutate(model = map(data, ~aov(score ~ get(group_comparison_char) * stimulus, data = .)),
+         tidy = map(model, broom::tidy)) %>% 
+  select(phase, tidy) %>% 
+  # unnest the tidy df
+  unnest(tidy) %>% 
+  ungroup() %>% 
+  # arrange output based on measure and phase groupings
+  arrange(phase) %>% 
+  mutate_if(
+    is.numeric,
+    round,
+    3
+  )
+  
+datatable(means_aov)
+
+save_table(means_aov)
+```
+
+### Follow-up tests
+```{r Tukey tests for means for both phases, echo=FALSE}
+# call and tidy the tukey posthoc
+means_aov_tukey <- df.long %>% 
+  # remove Discrimination rows
+  filter(stimulus != "Discrimination") %>% 
+  # group by phase (acquisition/extinction)
+  group_by(phase) %>%
+  # nest the df - essentially create a df for each grouping set above 
+  nest() %>% 
+  # create new list columns in the df containing anova model output, tukey follow-up tests and tidied version of the tukey follow-up tests
+  mutate(model = map(data, ~aov(score ~ get(group_comparison_char) * stimulus, data = .)),
+         tukey = map(model, TukeyHSD),
+         tidy = map(tukey, broom::tidy)) %>% 
+  select(phase, tidy) %>% 
+  # unnest the tidy df
+  unnest(tidy) %>% 
+  ungroup() %>% 
+  # arrange output based on measure and phase groupings
+  arrange(phase) %>% 
+  mutate_if(
+    is.numeric,
+    round,
+    3
+  )
+
+datatable(means_aov_tukey)
+
+save_table(means_aov_tukey)
+```
+
+### Intercepts
+```{r Mean ANOVA intercepts, echo=FALSE}
+mean_aov_intercepts <- df.long %>% 
+  filter(stimulus != "Discrimination") %>% 
+  group_by(phase) %>%
+  group_map(
+    ~aov(score ~ get(group_comparison_char) * stimulus, data = .) %>% 
+      summary.aov(., intercept = T)
+  ) 
+
+mean_aov_intercepts
+```
+
+## Discriminations {.tabset .tabset-fade}
+
+### ANOVAs
+```{r anova of Discriminations for both phases, echo=FALSE}
+# run anova for both phases - Discriminations by group
+Discriminations_aov <- df.long %>% 
+  filter(stimulus == "Discrimination") %>% 
+  group_by(phase) %>%
+  nest() %>% 
+  mutate(model = map(data, ~aov(score ~ get(group_comparison_char), data = .)),
+         tidy = map(model, broom::tidy)) %>% 
+  select(phase, tidy) %>% 
+  unnest(tidy) %>% 
+  ungroup() %>% 
+  arrange(phase) %>% 
+  mutate_if(
+    is.numeric,
+    round,
+    3
+  )
+
+datatable(Discriminations_aov)
+
+save_table(Discriminations_aov)
+```
+
+### Follow-up tests
+```{r Tukey tests for Discriminations for both phases, echo=FALSE}
+
+# call and tidy the tukey posthoc
+Discriminations_aov_tukey <- df.long %>% 
+  filter(stimulus == "Discrimination") %>% 
+  group_by(phase) %>%
+  nest() %>% 
+  mutate(model = map(data, ~aov(score ~ get(group_comparison_char), data = .)),
+         tukey = map(model, TukeyHSD),
+         tidy = map(tukey, broom::tidy)) %>% 
+  select(phase, tidy) %>% 
+  unnest(tidy) %>%
+  ungroup() %>% 
+  arrange(phase) %>% 
+  mutate_if(
+    is.numeric,
+    round,
+    3
+  )
+
+datatable(Discriminations_aov_tukey)
+
+save_table(Discriminations_aov_tukey)
+```
+
+### Intercepts
+```{r Discrimination ANOVA intercepts, echo=FALSE}
+Discriminations_aov_intercepts <- df.long %>% 
+  filter(stimulus == "Discrimination") %>% 
+  group_by(phase) %>%
+  group_map(
+    ~aov(score ~ get(group_comparison_char), data = .) %>% 
+      summary.aov(., intercept = T)
+  )
+
+Discriminations_aov_intercepts
+```
+
+## Expectancy means table
+```{r sig dif df creation, include=FALSE}
+# create df to combine p values for all comparisons between cases and controls on FC measures
+
+sig_difs <- bind_rows(
+  # combine rows from the tukey comparisons
+  means_aov_tukey,
+  Discriminations_aov_tukey,
+  .id = "key") %>% 
+  # convert to dataframe
+  as_data_frame(.) %>% 
+  # recode the values in the key column to reflect the dfs they came from
+  mutate(key = recode_factor(
+    key,
+    '1' = "Means",
+    '2' = "Discriminations"
+  )) %>%
+  # remove rows that compare across different types of stimuli
+  filter(comparison %in% c("control:CS+-case:CS+", "control:CS--case:CS-", "control-case")) %>% 
+  # select columns of interest
+  select(key, phase, comparison, adj.p.value) %>% 
+  # create stimulus column by detecting presence of stimulus in other columns
+  mutate(Stimulus =
+  case_when(
+    key == "Discriminations" ~ "Discrimination",
+    str_detect(comparison, "CS\\+") ~ "CS+",
+    str_detect(comparison, "CS\\-") ~ "CS-"
+    )) %>%
+  filter((key == "Means" & comparison != "control-case")|key == "Discriminations") %>% 
+  # remove unwanted columns and capitalise columns
+  select(Phase = phase, Stimulus, Adj.p.value = adj.p.value) %>% 
+  # convert all character columns to factors
+  mutate_if(is.character, ~ as.factor(.)) %>% 
+  # reorder the levels of the factors to match other dfs
+  mutate(
+    Stimulus = fct_relevel(Stimulus, "CS+")
+  ) %>% 
+  arrange(Phase, Stimulus)
+```
+
+```{r df of cohens d values, include = FALSE}
+## Cohen's d
+### Create df of Cohen's d values for each phase and stimulus
+
+# set objects that specify levels of the columns that are going to be looped through
+phase<-levels(df.long$phase)
+stimulus<-levels(df.long$stimulus)
+
+# create an empty dataframe
+df_cohensd_results<-NULL
+
+# for loop that goes through every combination of phase, measure and stimulus
+for(phase_i in phase){
+    for(stimulus_i in stimulus){
+      
+      # save a temporary subset of the dataframe for the current phase, measure, stimulus combination
+      df.long.tmp<-df.long[  df.long$phase == phase_i &
+                               df.long$stimulus == stimulus_i,]
+      
+      # save a temporary output of the cohen's d output for the current phase, measure, stimulus combination
+      d_out_tmp<-cohen.d(score ~ get(group_comparison_char), data = df.long.tmp)
+      
+      # create a temporary dataframe of the columns of interest
+      results_tmp<-data.frame( Phase = phase_i,
+                               Stimulus = stimulus_i,
+                               Estimate = d_out_tmp$estimate,
+                               Conf.int.lower = d_out_tmp$conf.int[1],
+                               Conf.int.upper = d_out_tmp$conf.int[2], 
+                               row.names=NULL)
+      
+      # add the temporary dataframe (containing a row of the variables of interest for the current phase, measure, stimulus combination) to the empty dataframe 'df_cohensd_results'
+      df_cohensd_results<-rbind(df_cohensd_results, results_tmp)
+    }
+}
+```
+
+```{r cohens d values with sig, echo = FALSE}
+# create df of all the cohens d scores and their significance levels and duits' estimates as a reference 
+df_cohensd <- df_cohensd_results %>% 
+  # rearrange data in the same order as column ordering 
+  arrange(Phase, Stimulus) %>%
+  # add p values from existing df
+  left_join(sig_difs, by = c("Phase", "Stimulus")) %>% 
+  
+  # create new columns
+  mutate(
+  # duits' effect sizes
+    # duits' subjective rating values
+    duits_subjective = case_when(
+      Phase == "Acquisition" & Stimulus == "CS+" ~ -.04,
+      Phase == "Acquisition" & Stimulus == "CS-" ~ .34,
+      Phase == "Acquisition" & Stimulus == "Discrimination" ~ -.45,
+      Phase == "Extinction" & Stimulus == "CS+" ~ .38,
+      Phase == "Extinction" & Stimulus == "CS-" ~ .26,
+      Phase == "Extinction" & Stimulus == "Discrimination" ~ .12),
+    # duits' overall values
+    duits_overall = case_when(
+      Phase == "Acquisition" & Stimulus == "CS+" ~ -.067,
+      Phase == "Acquisition" & Stimulus == "CS-" ~ .296,
+      Phase == "Acquisition" & Stimulus == "Discrimination" ~ -.1541,
+      Phase == "Extinction" & Stimulus == "CS+" ~ .352,
+      Phase == "Extinction" & Stimulus == "CS-" ~ .126,
+      Phase == "Extinction" & Stimulus == "Discrimination" ~ .147),
+    
+    # main overall findings
+    main_overall = case_when(
+      Phase == "Acquisition" & Stimulus == "CS+" ~ -.15,
+      Phase == "Acquisition" & Stimulus == "CS-" ~ .28,
+      Phase == "Acquisition" & Stimulus == "Discrimination" ~ -.25,
+      Phase == "Extinction" & Stimulus == "CS+" ~ .33,
+      Phase == "Extinction" & Stimulus == "CS-" ~ .25,
+      Phase == "Extinction" & Stimulus == "Discrimination" ~ .13),
+    
+  # significance levels
+    # below .001
+    sig_001 = ifelse(Adj.p.value <.001 , Estimate, NA),
+    # below .01
+    sig_01 = ifelse(Adj.p.value <.01 & Adj.p.value >=.001, Estimate, NA),
+    # below .01
+    sig_05 = ifelse(Adj.p.value <.05 & Adj.p.value >=.01, Estimate, NA),
+    
+  # nudging levels  
+    # sig 001 nudging for y
+    ynudge_001 = ifelse(
+                sig_001 >= 0, 
+                Conf.int.upper + .03,
+                Conf.int.lower - .03),
+    # sig 01 nudging for y
+    ynudge_01 = ifelse(
+                sig_01 >= 0, 
+                Conf.int.upper + .03,
+                Conf.int.lower - .03),
+    # sig 05 nudging for y
+    ynudge_05 = ifelse(
+                sig_05 >= 0, 
+                Conf.int.upper + .03,
+                Conf.int.lower - .03)
+      ) %>% 
+  mutate_if(is.logical, as.numeric) %>% 
+    mutate_if(
+      is.numeric,
+      round,
+      3
+      )
+```
+
+```{r Expectancy means, echo=F}
+expectancy_means <- expectancy_summary %>% 
+  filter(measure == "mean"| measure == "se"| measure == "n") %>% 
+  gather(key, value, c(case, control)) %>% 
+  spread(measure, value) %>% 
+  mutate(
+    mean_se = paste0(mean, " (", se, ")"),
+    key = paste0(key, " (N = ", n, ")"),
+    phase = factor(phase)
+    ) %>% 
+  select(-c(n, mean, se)) %>% 
+  spread(key, mean_se) %>% 
+  rename_all(.funs = ~str_to_title(.))
+
+means_hsd <- means_aov_tukey %>% 
+  select(-term) %>% 
+  filter(
+    comparison %in% c("control:CS+-case:CS+", "control:CS--case:CS-")
+    ) %>%
+  mutate_if(is.numeric, round, 2) %>% 
+  mutate(
+    Stimulus = case_when(
+      comparison == "control:CS+-case:CS+" ~ "CS+",
+      comparison == "control:CS--case:CS-" ~ "CS-",
+      TRUE ~ NA_character_
+    )
+  )
+
+Discriminations_hsd <- Discriminations_aov_tukey %>% 
+  select(-term) %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+  mutate(
+    Stimulus = "Discrimination"
+  )
+
+hsd_table <- bind_rows(means_hsd, Discriminations_hsd) %>% 
+  mutate(
+    estimate = -(estimate),
+    conf.hi = -(conf.low),
+    conf.lo = -(conf.high),
+    Stimulus = factor(Stimulus, levels = c("CS+", "CS-", "Discrimination")),
+    `HSD (95% CIs)` = paste0(estimate, " (", conf.lo, ", ", conf.hi, ")")
+  ) %>% 
+  select(Phase = phase, Stimulus, `HSD (95% CIs)`) %>%  
+  arrange(Phase, Stimulus)
+
+effectsize_pval <- df_cohensd %>% 
+  select(Phase:Adj.p.value) %>%
+  mutate(Adj.p.value = ifelse(Adj.p.value < 0.001, "< 0.001", Adj.p.value)) %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+  mutate(`Cohen's d (95% CIs)` = paste0(Estimate, " (", Conf.int.lower, ", ", Conf.int.upper, ")")) %>% 
+  select(Phase, Stimulus, `Cohen's d (95% CIs)`, `Adjusted p-value` = Adj.p.value)
+
+expectancy_means_table <- list(expectancy_means, hsd_table, effectsize_pval) %>% reduce(left_join, by = c("Phase", "Stimulus"))
+
+save_table(expectancy_means_table)
+
+expectancy_means_table %>% datatable()
+
+expectancy_means_table_gt <- expectancy_means_table %>% 
+  gt(rowname_col = "Stimulus", groupname_col = "Phase") %>% 
+  tab_spanner(label = "Group means (SE)", columns = contains(c("Case", "Control"))) %>% 
+  cols_align(
+    align = "right",
+    columns = T
+  ) %>% 
+  tab_header(title = "Expectancy summary table")
+```
+
+## Extra
+```{r}
+df.long %>% 
+  filter(phase == "Extinction", stimulus != "Discrimination") %>% 
+  cohen.d(score ~ get(group_comparison_char), .)
+```
+
+***
+
+# Plot {.tabset .tabset-fade}
+
+## Barplots
+```{r barplots of cohens d values, echo = FALSE, warning=FALSE}
+barplots <- df_cohensd %>%
+  mutate(
+    Stimulus = fct_relevel(Stimulus, c("CS+", "CS-", "Discrimination"))
+         ) %>% 
+  # plot the cohens d estimate for each stimulus for each measure
+  ggplot(data = .,
+         aes(x = Stimulus, y = Estimate)
+  ) +
+  # add bars
+  geom_bar(aes(fill = Phase),
+           position = position_dodge(width = 0.9), 
+           stat = "identity",
+           width = .7,
+           show.legend = F
+  ) +
+  # change colours of the bars
+  scale_fill_manual(values = c("#A6BBE8", "#BDE5B0"),
+                    labels = c("Acquisition", "Extinction")
+  ) +
+  # adjust the y axis (rename is, set limits and breaks)
+  scale_y_continuous(name = "Group difference effect size (d)", 
+                     limits = c(-.6, .6), 
+                     breaks = round(seq(-.6,.6,.1),1)
+  ) +
+  # add error bars for the 95% confidence intervals, make sure the dodge is set the same as the bars
+  geom_errorbar(aes(ymin = Conf.int.lower, ymax = Conf.int.upper),
+                position = position_dodge(width = 0.9),
+                width = 0.2
+  ) +
+  # wrap plots by phase (acquisition/extinction)
+  facet_wrap(~ Phase) +
+  # remove vertical lines, background of the phase labels (facets), the x axis title, and the legend
+  theme(panel.background = element_blank(),
+        panel.grid.major.y = element_line(colour = "#999999", size = 0.25),
+        panel.grid.major.x = element_blank(),
+        strip.text.x = element_text(size = 10),
+        strip.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        legend.position = "none"
+  ) +
+  # add title and caption
+  labs(title = group_comparison_char
+  ) +
+  # make the x axis thicker at 0
+  geom_hline(yintercept=0, 
+             size = 0.5, 
+             colour = "#999999"
+  ) +
+  # add points for duits paper estimates
+  geom_point(aes(x = Stimulus, y = {{bar_diamonds}}), shape = 18, size = 3, colour = "#EF9900", alpha = 0.7) +
+  # add star labels for each level of significance
+  geom_text(inherit.aes = F, 
+            aes(x = Stimulus, y = ynudge_001, label = "***")
+  ) +
+  geom_text(inherit.aes = F, 
+            aes(x = Stimulus, y = ynudge_01, label = "**")
+  ) +
+  geom_text(inherit.aes = F, 
+            aes(x = Stimulus, y = ynudge_05, label = "*")
+  )
+
+# save barplots
+ggsave(
+  file = paste0("../plots/",
+                group_comparison_char,
+                "/",
+                "barplots",
+                ".pdf"), 
+  plot = barplots, 
+  width = 30, 
+  height = 20, 
+  units = "cm"
+  )
+
+barplots
+```
+
+## Elephant plots {.tabset .tabset-fade}
+```{r Prepare elephant data, include = FALSE}
+# create a long df for trial level data to display in elephant plots
+df.trial.long.grouped <- df.wide %>% 
+  # select columns for each fear conditioning trial and the diagnostic group of the participants
+  select({{group_comparison}}, fc_trials) %>% 
+  # split the data by the diagnostic group to get a plot for each group
+  group_by({{group_comparison}}) %>%
+  # create a column that displays the number of participants that are in the group that the row belongs to
+  mutate(., n = ifelse(get(group_comparison_char) == "case", sum(get(group_comparison_char) == "case"), sum(get(group_comparison_char) == "control"))) %>% 
+  # gather to make the data long
+  gather(., key, value, -c({{group_comparison}}, n)) %>% 
+  # create separate columns for trial number and extra information about the phase and stimulus that the trial is associated with
+  separate(., key, c("Info", "Trial"), sep = "_") %>% 
+  # separate info into separate columns for phase and stimulus
+  separate(., Info, c("Phase", "Stimulus"), sep = -3) %>%
+  # change the trial column to a numeric column
+  mutate(., Trial = as.numeric(Trial)) %>%
+  ungroup() %>% 
+  # group rows by their status, phase, stimulus and trial to begin making summary scores for the plot
+  group_by({{group_comparison}}, Phase, Stimulus, Trial) %>%
+  # create summary scores of the mean, std deviation and number of participants in each group
+  summarise(mean = mean(value, na.rm = T), std.dev = sd(value, na.rm = T), n = mean(n)) %>%
+  # create std error of the mean and confidence intervals
+  mutate(sem = std.dev/sqrt(n),
+         ci_low = mean - 2*(sem),
+         ci_high = mean + 2*(sem)) %>%
+  ungroup %>% 
+  # reformat grouping columns to factors and sort the levels of each column out
+  mutate(Phase = factor(Phase, levels = c("FCT1", "FCT3")),
+         Phase = fct_recode(Phase, "Acquisition" = "FCT1", "Extinction" = "FCT3"),
+         Stimulus = factor(Stimulus, levels = c("CSp", "CSm")),
+         Stimulus = fct_recode(Stimulus, "CS+" = "CSp", "CS-" = "CSm")) %>%
+  # arrange trials by phase, stimulus, trial
+  arrange(Phase, Stimulus, Trial)
+
+
+# create a long df for trial level data to display in elephant plots
+df.trial.long.whole <- df.wide %>% 
+  # select columns for each fear conditioning trial and the diagnostic group of the participants
+  select(fc_trials) %>% 
+  # create a column that displays the number of participants that are in the group that the row belongs to
+  mutate(., n = nrow(.)) %>% 
+  # gather to make the data long
+  gather(., key, value, -n) %>% 
+  # create separate columns for trial number and extra information about the phase and stimulus that the trial is associated with
+  separate(., key, c("Info", "Trial"), sep = "_") %>% 
+  # separate info into separate columns for phase and stimulus
+  separate(., Info, c("Phase", "Stimulus"), sep = -3) %>%
+  # change the trial column to a numeric column
+  mutate(., Trial = as.numeric(Trial)) %>%
+  # group rows by phase, stimulus and trial to begin making summary scores for the plot
+  group_by(Phase, Stimulus, Trial) %>%
+  # create summary scores of the mean, std deviation and number of participants
+  summarise(mean = mean(value, na.rm = T), std.dev = sd(value, na.rm = T), n = mean(n)) %>%
+  # create std error of the mean and confidence intervals
+  mutate(sem = std.dev/sqrt(n),
+         ci_low = mean - 2*(sem),
+         ci_high = mean + 2*(sem)) %>%
+  # ungroup
+  ungroup %>% 
+  # reformat grouping columns to factors and sort the levels of each column out
+  mutate(Phase = factor(Phase, levels = c("FCT1", "FCT3")),
+         Phase = fct_recode(Phase, "Acquisition" = "FCT1", "Extinction" = "FCT3"),
+         Stimulus = factor(Stimulus, levels = c("CSp", "CSm")),
+         Stimulus = fct_recode(Stimulus, "CS+" = "CSp", "CS-" = "CSm")) %>%
+  # arrange trials by phase, stimulus, trial
+  arrange(Phase, Stimulus, Trial)
+```
+
+### Whole elephant
+```{r Whole elephant, echo=FALSE}
+# create elephant plot for all participants
+whole_elephant <- df.trial.long.whole %>% 
+  ggplot(data = ., aes(x = Trial, y = mean, color= Stimulus)
+  ) +
+    # add a line to the plot
+    geom_line() +
+    # add error shading based on the confidence intervals
+    geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = Stimulus),
+                linetype = 0,
+                alpha = 0.2,
+                size = .8
+    ) +
+    # split the plot by phase
+    facet_grid(~ Phase, 
+               scales = "free_x",
+               space = "free_x"
+    ) +
+    # adjust the labels
+    labs(y="Mean expectancy rating", 
+         x = "Trials"
+    ) +
+    # remove the background and panel grids and move the legend to the bottom
+    theme(strip.background = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          legend.position = 'bottom'
+    ) +
+    # use the breaks_fun function to set the breaks for the x axis
+    scale_x_continuous(breaks = breaks_fun) +
+    # set the y axis breaks to range from minimum to maximum expectancy ratings
+    scale_y_continuous(breaks = seq(0, 10, by = 1), limits = c(1, 9))
+
+# save barplots
+ggsave(
+  file = paste0("../plots/",
+                group_comparison_char,
+                "/",
+                "whole_elephant",
+                ".pdf"), 
+  plot = whole_elephant, 
+  width = 30, 
+  height = 20, 
+  units = "cm"
+  )
+
+# print elephant plot for all participants
+whole_elephant
+```
+
+### Grouped elephants
+```{r Grouped elephants, echo=FALSE}
+# create elephant plots
+group_elephants <- df.trial.long.grouped %>% 
+  # group the df by the different groups (e.g. case and control)
+  group_by({{group_comparison}}) %>% 
+  # create a plot for each of these groups with trial on the x axis and mean expectancy rating on the y axis. Group and colour the scores by stimulus type.
+  group_map(~ ggplot(data = ., 
+               aes(x = Trial, y = mean, color = Stimulus)
+  ) +
+    # add a line to the plot
+    geom_line() +
+    # add error shading based on the confidence intervals
+    geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = Stimulus),
+                linetype = 0,
+                alpha = 0.2,
+                size = .8
+    ) +
+    # split the plot by phase
+    facet_grid(. ~ Phase, 
+               scales = "free_x",
+               space = "free_x"
+    ) +
+    # adjust the labels
+    labs(y="Mean expectancy rating", 
+         x = "Trials",
+         # adjust the title based on the status of the participants used
+         title = unique(.[ , group_comparison_char])
+    ) +
+    # remove the background and panel grids and move the legend to the bottom
+    theme(strip.background = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          legend.position = 'bottom'
+    ) +
+    # use the breaks_fun function to set the breaks for the x axis
+    scale_x_continuous(breaks = breaks_fun) +
+    # set the y axis breaks to range from minimum to maximum expectancy ratings
+    scale_y_continuous(breaks = seq(0, 10, by = 1), limits = c(1, 9)),
+  keep = T
+  )
+
+# print all of the plots held in the list of elephant plots that were created
+for (i in 1:length(group_elephants)) {
+    print(group_elephants[[i]])
+}
+```
